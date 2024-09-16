@@ -3,3 +3,4 @@ bin2c
 *.exe
 *.swp
 temp/
+in/*
