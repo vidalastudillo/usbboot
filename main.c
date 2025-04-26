@@ -10,7 +10,6 @@
 #include "msd/bootcode.h"
 #include "msd/start.h"
 #include "msd/bootcode4.h"
-#include "msd/start4.h"
 // 2712 doesn't use start5.elf
 
 /*
@@ -295,18 +294,18 @@ libusb_device_handle * LIBUSB_CALL open_device_with_vid(
 				else
 					second_stage = "bootcode.bin";
 
-				if (bcm2712 && !directory) {
+				if ((bcm2711 || bcm2712) && !directory) {
 					directory = INSTALL_PREFIX "/share/rpiboot/mass-storage-gadget64/";
 					use_bootfiles = 1;
 					snprintf(bootfiles_path, sizeof(bootfiles_path),"%s%s", directory, "bootfiles.bin");
-					printf("2712: Directory not specified - trying default %s\n", directory);
+					printf("Directory not specified - trying default %s\n", directory);
 
 					fp_second_stage = check_file(directory, second_stage, 1);
 					if (!fp_second_stage)
 					{
 						directory = "mass-storage-gadget64/";
 						snprintf(bootfiles_path, sizeof(bootfiles_path),"%s%s", directory, "bootfiles.bin");
-						printf("2712: trying local path %s\n", directory);
+						printf("Trying local path %s\n", directory);
 						fp_second_stage = check_file(directory, second_stage, 1);
 					}
 				}
@@ -608,7 +607,12 @@ int second_stage_prep(FILE *fp, FILE *fp_sig)
 
 	if(fp_sig != NULL)
 	{
-		fread(boot_message.signature, 1, sizeof(boot_message.signature), fp_sig);
+		size = fread(boot_message.signature, 1, sizeof(boot_message.signature), fp_sig);
+		if (size != sizeof(boot_message.signature))
+		{
+			fprintf(stderr, "Failed to read bootcode signature \n");
+			return -1;
+		}
 	}
 
 	if (second_stage_txbuf)
@@ -618,14 +622,14 @@ int second_stage_prep(FILE *fp, FILE *fp_sig)
 	second_stage_txbuf = (uint8_t *) malloc(boot_message.length);
 	if (second_stage_txbuf == NULL)
 	{
-		printf("Failed to allocate memory\n");
+		fprintf(stderr, "Failed to allocate memory\n");
 		return -1;
 	}
 
 	size = fread(second_stage_txbuf, 1, boot_message.length, fp);
 	if(size != boot_message.length)
 	{
-		printf("Failed to read second stage\n");
+		fprintf(stderr, "Failed to read second stage\n");
 		return -1;
 	}
 
@@ -684,6 +688,23 @@ FILE * check_file(const char * dir, const char *fname, int use_fmem)
 	{
 		const char *prefix = bcm2712 ? "2712" : bcm2711 ? "2711" : "2710";
 		unsigned long length = 0;
+
+		// If 'dir' is specified and the file exists then load this in preference
+		// to the file in bootfiles.bin e.g. use a custom config.txt or cmdline.txt
+		// to override settings in the mass-storage-gadget
+		if (dir)
+		{
+			snprintf(path, sizeof(path), "%s/%s/%s", dir, prefix, fname);
+			path[sizeof(path) - 1] = 0;
+			fp = fopen(path, "rb");
+
+			if (fp)
+			{
+				printf("Loading bootfiles.bin overlay: %s\n", path);
+				return fp;
+			}
+		}
+
 		snprintf(path, sizeof(path), "%s/%s", prefix, fname);
 		path[sizeof(path) - 1] = 0;
 		if (bootfile_data)
@@ -729,7 +750,7 @@ FILE * check_file(const char * dir, const char *fname, int use_fmem)
 			if(strcmp(fname, "bootcode4.bin") == 0)
 				fp = fmemopen(msd_bootcode4_bin, msd_bootcode4_bin_len, "rb");
 			else if(strcmp(fname, "start4.elf") == 0)
-				fp = fmemopen(msd_start4_elf, msd_start4_elf_len, "rb");
+				fp = fmemopen(msd_start_elf, msd_start_elf_len, "rb");
 		}
 		else
 		{
@@ -964,7 +985,7 @@ int main(int argc, char *argv[])
 
 	get_options(argc, argv);
 
-	printf("RPIBOOT: build-date %s version %s %s\n\n", __DATE__, PKG_VER, GIT_VER);
+	printf("RPIBOOT: build-date %s pkg-version %s %s\n\n", BUILD_DATE, PKG_VER, GIT_VER);
 	printf("Please fit the EMMC_DISABLE / nRPIBOOT jumper before connecting the power and USB cables to the target device.\n");
 	printf("If the device fails to connect then please see https://rpltd.co/rpiboot for debugging tips.\n\n");
 
